@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Retro Flip Clock — a split-flap desk clock built in Spline</title>
+  <meta name="description" content="An orange split-flap desk clock modelled to the millimetre in Spline. It shows your local time, flips every minute and comes apart as you scroll.">
+  <meta name="theme-color" content="#e4e3df">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <canvas id="scene" aria-label="3D model of an orange split-flap desk clock showing your local time"></canvas>
+
+  <div class="loader" id="loader" role="status">
+    <span class="loader-dot"></span>
+    <span id="loader-text">Loading the clock…</span>
+  </div>
+
+  <header class="top">
+    <span class="brand">Retro Flip Clock</span>
+    <a class="top-link" href="https://github.com/itskoyii/retro-clock">GitHub</a>
+  </header>
+
+  <main>
+    <section class="step" data-step="0">
+      <div class="card card--left">
+        <p class="eyebrow">Built in Spline</p>
+        <h1>Retro Flip Clock</h1>
+        <p>An orange split-flap desk clock, modelled to the millimetre. It shows your local time in 24-hour format.</p>
+        <p class="hint">Scroll to take it apart <span aria-hidden="true">↓</span></p>
+      </div>
+    </section>
+
+    <section class="step" data-step="1">
+      <div class="card card--left">
+        <p class="eyebrow">01 · Mechanism</p>
+        <h2>A real split flap</h2>
+        <p>Every minute the top flap falls 180° on its hinge pins, uncovers the next number and lands with a clack.</p>
+        <p class="hint">Turn the sound on (bottom right) to hear it.</p>
+      </div>
+    </section>
+
+    <section class="step" data-step="2">
+      <div class="card card--right">
+        <p class="eyebrow">02 · Front</p>
+        <h2>Pulled apart</h2>
+        <ul>
+          <li>Moulded clear acrylic tray with a 2.7 mm face</li>
+          <li>Cards set about 16 mm into their wells, so a falling flap clears the cover</li>
+          <li>Digits clipped live from type and split at the hinge</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="step" data-step="3">
+      <div class="card card--left">
+        <p class="eyebrow">03 · Back</p>
+        <h2>Built to come apart</h2>
+        <ul>
+          <li>Battery door sits flush with a 0.5 mm gap</li>
+          <li>Counterbored screws with 1.0 mm clearance</li>
+          <li>Runs on one AA battery</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="step" data-step="4">
+      <div class="card card--right">
+        <p class="eyebrow">04 · Together</p>
+        <h2>Back in one piece</h2>
+        <p>Designed and built by <a href="https://github.com/itskoyii">itskoyii</a> in Spline. The model, flip script and this page are open source.</p>
+        <p><a class="button" href="https://github.com/itskoyii/retro-clock">View the code</a></p>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
