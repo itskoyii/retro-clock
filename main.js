@@ -2,7 +2,7 @@ import { Application } from 'https://unpkg.com/@splinetool/runtime@2.0.60/build/
 import { pose, SECTION_STOPS } from './timeline.js';
 
 // Spline → Export → Code → copy the scene.splinecode URL and paste it here.
-const SCENE_URL = 'https://prod.spline.design/REPLACE_WITH_YOUR_SCENE_ID/scene.splinecode';
+const SCENE_URL = 'https://prod.spline.design/V4MRvqDF3GSNgWzS/scene.splinecode';
 
 const canvas = document.getElementById('scene');
 const loader = document.getElementById('loader');
