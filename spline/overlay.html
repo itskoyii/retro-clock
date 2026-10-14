@@ -15,8 +15,8 @@
     -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
   }
   .sound .dot { width: 8px; height: 8px; border-radius: 50%; background: #7d766d; transition: background .2s, box-shadow .2s; }
-  .sound[aria-pressed="true"] .dot { background: #ff7a3d; box-shadow: 0 0 8px #ff7a3d; }
-  .sound:focus-visible { outline: 2px solid #ff7a3d; outline-offset: 2px; }
+  .sound[aria-pressed="true"] .dot { background: #fc6526; box-shadow: 0 0 8px #fc6526; }
+  .sound:focus-visible { outline: 2px solid #fc6526; outline-offset: 2px; }
 </style>
 </head>
 <body>
@@ -24,9 +24,11 @@
 <script>
 // Split-flap mechanism for the Retro Flip Clock.
 // Shows the viewer's local time (24-hour). Each card has a moving flap on its hinge:
-// the flap falls forward 180°, revealing the new top half behind it and landing
-// with the new bottom half. Numbers are built from the digit outlines stored in the
-// scene variable "glyphData" (Inter Bold, 52 pt) and clipped at the hinge line.
+// the holdback tine swings clear, the flap falls forward 180° (revealing the new top half
+// behind it) and lands with the new bottom half. Numbers are built from the digit outlines
+// stored in the scene variable "glyphData" (Inter Bold, 52 pt) and clipped at the hinge line.
+// The snail cams turn with the motor; each follower lever rides up its spiral and drops off
+// the step at the moment its card flips.
 (async () => {
   await spline.ready;
 
@@ -34,11 +36,24 @@
   const FALL = 300, BOUNCE = 80, BOUNCE_DEG = 8;            // normal flip
   const FLICK_FALL = 150, FLICK_BOUNCE = 40, FLICK_DEG = 4; // fast flick on load
   const FLICK_STEPS = 6;
+  const FLICK_LEVEL = 0.55;                                 // the flick plays softer
+
+  const TINE_DEG = -60;        // the tine swings forward, toward the cover, to let the flap go
+  const TINE_RELEASE = 0.25;   // share of the fall spent swinging clear
+  const TINE_HOLD_DEG = 40;    // it springs back once the flap is past this angle
+  const TINE_SPRING = 120;     // ms, with a small overshoot past rest
+
+  // Snail cam: a spiral (radius 4 → 9 mm) on the drum spindle, one turn per card step.
+  // Follower lever: pivot 13 mm above and 8.4 mm in front of the spindle, 8 mm long,
+  // pointing down at -119.7° in its rest pose. Below 7.55 mm of cam it sits on its stop.
+  const CAM_CONTACT = 9;       // where the follower touches the cam, degrees from +y toward +z
+  const LEVER_LEN = 8, LEVER_PIVOT = Math.hypot(13, 8.4);
+  const LEVER_OFFSET = Math.atan2(8.4, 13) * 180 / Math.PI + 119.7;
 
   // ---------- scene lookups ----------
-  const find = async (name) => {
+  const find = async (name, optional) => {
     const o = await spline.findObjectByName(name);
-    if (!o) console.warn('Clock: missing object "' + name + '"');
+    if (!o && !optional) console.warn('Clock: missing object "' + name + '"');
     return o;
   };
   const cards = {};
@@ -49,7 +64,12 @@
       if (!o) return;
       ids[part] = o.id;
     }
-    cards[key] = { ids, mod: key === 'Hour' ? 24 : 60, value: key === 'Hour' ? '10' : '12', target: null, queue: [], busy: false };
+    // the mechanism parts animate when present; the flip works without them
+    const extra = async (part) => { const o = await find(key + ' ' + part, true); return o ? o.id : null; };
+    cards[key] = {
+      ids, mod: key === 'Hour' ? 24 : 60, value: key === 'Hour' ? '10' : '12', target: null, queue: [], busy: false,
+      tine: await extra('Tine Pivot'), cam: await extra('Snail Cam'), lever: await extra('Cam Lever Pivot'), leverDeg: null
+    };
   }
 
   // ---------- digit outlines ----------
@@ -119,37 +139,60 @@
   const write = (id, m) => spline.updateObject(id, { geometry: { vertices: m.vertices, normals: m.normals, indices: m.indices } });
 
   // ---------- sound (procedural WebAudio, off until the visitor turns it on) ----------
+  // slip: the tine lets go (a tiny dry tick). flump: the tile drops and slaps the one below
+  // (a soft thud, a damped slap and the hollow case ringing). settle: the bounce coming to rest.
   const sfx = (() => {
-    let ctx = null, master = null, noise = null, on = false;
+    let ctx = null, out = null, noise = null, on = false;
     function init() {
       ctx = new (window.AudioContext || window.webkitAudioContext)();
-      master = ctx.createGain(); master.gain.value = 0.7; master.connect(ctx.destination);
-      const len = Math.floor(ctx.sampleRate * 0.08);
+      const comp = ctx.createDynamicsCompressor();             // keeps quick flicks from stacking into clipping
+      comp.threshold.value = -20; comp.knee.value = 10; comp.ratio.value = 4;
+      comp.attack.value = 0.002; comp.release.value = 0.1;
+      out = ctx.createGain(); out.gain.value = 0.8;
+      out.connect(comp).connect(ctx.destination);
+      const len = Math.floor(ctx.sampleRate * 0.3);
       noise = ctx.createBuffer(1, len, ctx.sampleRate);
       const d = noise.getChannelData(0);
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     }
-    const jit = () => 0.95 + Math.random() * 0.1;
-    function burst(freq, q, peak, decay, when) {
-      const s = ctx.createBufferSource(); s.buffer = noise;
-      const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = q;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, when);
-      g.gain.exponentialRampToValueAtTime(peak, when + 0.001);
-      g.gain.exponentialRampToValueAtTime(0.0001, when + decay);
-      s.connect(f).connect(g).connect(master);
-      s.start(when); s.stop(when + decay + 0.02);
+    const vary = (amount) => 1 + (Math.random() * 2 - 1) * amount;
+    const filter = (type, freq, q) => { const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q || 0.707; return f; };
+    function envelope(param, when, peak, attack, decay) {
+      param.setValueAtTime(0.0001, when);
+      param.exponentialRampToValueAtTime(peak, when + attack);
+      param.exponentialRampToValueAtTime(0.0001, when + attack + decay);
     }
-    function thump(freq, peak, decay, when) {
-      const o = ctx.createOscillator(); o.type = 'sine';
-      o.frequency.setValueAtTime(freq * 1.4, when);
-      o.frequency.exponentialRampToValueAtTime(freq, when + decay * 0.6);
+    function noiseHit(chain, peak, attack, decay, when) {
+      const src = ctx.createBufferSource(); src.buffer = noise;
+      let node = src;
+      for (const f of chain) { node.connect(f); node = f; }
       const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, when);
-      g.gain.exponentialRampToValueAtTime(peak, when + 0.002);
-      g.gain.exponentialRampToValueAtTime(0.0001, when + decay);
-      o.connect(g).connect(master);
-      o.start(when); o.stop(when + decay + 0.02);
+      envelope(g.gain, when, peak, attack, decay);
+      node.connect(g).connect(out);
+      src.start(when, Math.random() * 0.1);
+      src.stop(when + attack + decay + 0.03);
+    }
+    function playSlip(level) {
+      noiseHit([filter('highpass', 1800), filter('bandpass', 2800 * vary(0.06), 3)], 0.06 * level, 0.0008, 0.006, ctx.currentTime);
+    }
+    function playFlump(level) {
+      const t = ctx.currentTime, p = vary(0.06);
+      level *= vary(0.1);
+      // thud: the tile's weight
+      const o = ctx.createOscillator(); o.type = 'sine';
+      o.frequency.setValueAtTime(170 * p, t);
+      o.frequency.exponentialRampToValueAtTime(95 * p, t + 0.06);
+      const g = ctx.createGain();
+      envelope(g.gain, t, 0.5 * level, 0.002, 0.088);
+      o.connect(g).connect(out);
+      o.start(t); o.stop(t + 0.12);
+      // slap: card on card, darkening as it damps
+      const lp = filter('lowpass', 1400 * p);
+      lp.frequency.setValueAtTime(1400 * p, t);
+      lp.frequency.exponentialRampToValueAtTime(500 * p, t + 0.035);
+      noiseHit([lp], 0.9 * level, 0.0015, 0.035, t);
+      // hollow case resonance
+      noiseHit([filter('bandpass', 480 * p, 6)], 2.4 * level, 0.002, 0.11, t);
     }
     return {
       async toggle() {
@@ -158,13 +201,9 @@
         if (on && ctx.state !== 'running') await ctx.resume();
         return on;
       },
-      tick(fast) { if (!on || !ctx) return; burst(3500 * jit(), 1.4, fast ? 0.12 : 0.18, 0.009, ctx.currentTime); },
-      clack(fast) {
-        if (!on || !ctx) return;
-        const t = ctx.currentTime;
-        burst(1800 * jit(), 0.9, fast ? 0.35 : 0.55, 0.025, t);
-        thump(160 * jit(), fast ? 0.3 : 0.45, 0.03, t);
-      }
+      slip(level) { if (on && ctx) playSlip(level); },
+      flump(level) { if (on && ctx) playFlump(level); },
+      settle(level) { if (on && ctx) playFlump(0.3 * level); }
     };
   })();
   const btn = document.getElementById('sound');
@@ -174,28 +213,47 @@
     document.getElementById('soundLabel').textContent = on ? 'Sound on' : 'Sound off';
   });
 
-  // ---------- flap motion ----------
+  // ---------- flap and tine motion ----------
   const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
-  function swing(card, fall, bounce, bounceDeg, fast) {
-    const pivot = card.ids['Flap Pivot'];
+  const easeOut = (x) => 1 - Math.pow(1 - x, 3);
+  const easeInOut = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+  const tineHold = (fall) => fall * Math.sqrt(TINE_HOLD_DEG / 180);   // the flap angle is 180·p², so it passes TINE_HOLD_DEG here
+
+  // Swing clear early in the fall, hold while the flap goes past, then spring back with a small overshoot
+  function tineAngle(t, fall) {
+    const release = fall * TINE_RELEASE, hold = tineHold(fall);
+    if (t < release) return TINE_DEG * easeOut(t / release);
+    if (t < hold) return TINE_DEG;
+    const u = (t - hold) / TINE_SPRING;
+    if (u >= 1) return 0;
+    if (u < 0.6) return TINE_DEG + (6 - TINE_DEG) * easeOut(u / 0.6);
+    return 6 * (1 - easeInOut((u - 0.6) / 0.4));
+  }
+
+  function swing(card, fall, bounce, bounceDeg, level) {
+    const pivot = card.ids['Flap Pivot'], tine = card.tine;
+    const end = Math.max(fall + bounce, tine ? tineHold(fall) + TINE_SPRING : 0);
+    sfx.slip(level);
     return new Promise((done) => {
       const t0 = performance.now();
-      let landed = false;
+      let landed = false, settled = false;
       (function tick(now) {
         const t = now - t0;
         if (t < fall) {
           const p = t / fall;
           spline.updateObject(pivot, { rotation: { x: 180 * p * p } });   // gravity-like ease-in
         } else if (t < fall + bounce) {
-          if (!landed) { landed = true; sfx.clack(fast); }
+          if (!landed) { landed = true; sfx.flump(level); }
           const q = (t - fall) / bounce;
           spline.updateObject(pivot, { rotation: { x: 180 - bounceDeg * Math.sin(Math.PI * q) } });
-        } else {
-          if (!landed) { landed = true; sfx.clack(fast); }
+        } else if (!settled) {
+          if (!landed) { landed = true; sfx.flump(level); }
+          settled = true;
+          sfx.settle(level);
           spline.updateObject(pivot, { rotation: { x: 180 } });
-          done();
-          return;
         }
+        if (tine) spline.updateObject(tine, { rotation: { x: tineAngle(t, fall) } });
+        if (t >= end) { done(); return; }
         requestAnimationFrame(tick);
       })(t0);
     });
@@ -205,8 +263,7 @@
     const g = glyph(to);
     const ids = card.ids;
     await Promise.all([write(ids['Top Glyph'], g.top), write(ids['Flap Back Glyph'], g.back)]);
-    sfx.tick(fast);
-    await swing(card, fast ? FLICK_FALL : FALL, fast ? FLICK_BOUNCE : BOUNCE, fast ? FLICK_DEG : BOUNCE_DEG, fast);
+    await swing(card, fast ? FLICK_FALL : FALL, fast ? FLICK_BOUNCE : BOUNCE, fast ? FLICK_DEG : BOUNCE_DEG, fast ? FLICK_LEVEL : 1);
     await Promise.all([write(ids['Bottom Glyph'], g.bottom), write(ids['Flap Front Glyph'], g.top)]);
     await frame(); await frame();
     spline.updateObject(ids['Flap Pivot'], { rotation: { x: 0 } });   // invisible reset: front now matches the top half behind it
@@ -230,6 +287,35 @@
     card.busy = false;
   }
 
+  // ---------- snail cams and follower levers ----------
+  // Lever angle that puts its tip on the cam radius under it (law of cosines about the spindle)
+  function leverAngle(frac) {
+    const reach = Math.max(4 + 5 * frac, 7.55) + 0.55;      // cam radius under the follower + half the lever's thickness
+    const c = (reach * reach - LEVER_PIVOT * LEVER_PIVOT - LEVER_LEN * LEVER_LEN) / (2 * LEVER_PIVOT * LEVER_LEN);
+    return LEVER_OFFSET - Math.acos(Math.max(-1, Math.min(1, c))) * 180 / Math.PI;
+  }
+  function snap(id, to) {                                    // the follower falls off the step with a small rebound
+    const t0 = performance.now();
+    (function tick(now) {
+      const u = Math.min(1, (now - t0) / 140);
+      spline.updateObject(id, { rotation: { x: to + 2.5 * Math.sin(2 * Math.PI * u) * (1 - u) } });
+      if (u < 1) requestAnimationFrame(tick);
+    })(t0);
+  }
+  function turn(card, frac) {                                // frac: 0 → 1 over one card step
+    if (card.cam) spline.updateObject(card.cam, { rotation: { x: CAM_CONTACT + 360 * frac, y: 180, z: 0 } });
+    if (!card.lever) return;
+    const to = leverAngle(frac), from = card.leverDeg;
+    card.leverDeg = to;
+    if (from !== null && from - to > 5) snap(card.lever, to);
+    else spline.updateObject(card.lever, { rotation: { x: to } });
+  }
+  function turnCams() {                                      // steps once a second, like the quartz motor
+    const d = new Date(), s = d.getSeconds(), m = d.getMinutes();
+    turn(cards.Minute, s / 60);
+    turn(cards.Hour, (m + s / 60) / 60);
+  }
+
   // ---------- time ----------
   const pad = (n) => String(n).padStart(2, '0');
   const now = () => { const d = new Date(); return { h: pad(d.getHours()), m: pad(d.getMinutes()) }; };
@@ -242,9 +328,11 @@
     enqueue(cards.Hour, steps ? seq(n.h, 24, steps) : [n.h], fast);
   }
 
+  turnCams();
   sync(true, FLICK_STEPS);   // load: quick flick that lands on the current time
 
   setInterval(() => {
+    turnCams();
     const n = now();
     if (n.m !== cards.Minute.target) { cards.Minute.target = n.m; enqueue(cards.Minute, [n.m], false); }
     if (n.h !== cards.Hour.target) { cards.Hour.target = n.h; enqueue(cards.Hour, [n.h], false); }

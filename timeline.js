@@ -43,12 +43,15 @@ function clockPose(p) {
 // Offsets are in millimetres along the clock's own axes (+z = front, -z = back).
 // The movement stays put; the shells slide away from it along z.
 // Back sequence: the battery cover pulls out and slides aside, then both AA cells come out
-// through the opening. On the way back the cells go in first and the cover goes on last.
+// through the opening. The setting door lifts off the same way and the time-setting knob turns.
+// On the way back the cells go in first and the covers go on last.
 export function pose(p) {
   const doorPull = outAndBack(p, 0.60, 0.645, 0.865, 0.89);     // off the clock, then back on at the very end
   const doorSlide = outAndBack(p, 0.645, 0.69, 0.84, 0.865);    // clear of the opening, then back over it
   const cell1 = outAndBack(p, 0.69, 0.75, 0.81, 0.84);
   const cell2 = outAndBack(p, 0.705, 0.765, 0.80, 0.83);
+  const settingPull = outAndBack(p, 0.62, 0.66, 0.855, 0.89);
+  const settingSlide = outAndBack(p, 0.66, 0.70, 0.83, 0.855);
   return {
     clock: clockPose(p),
     cover: 110 * outAndBack(p, 0.32, 0.42, 0.87, 0.96),
@@ -59,7 +62,8 @@ export function pose(p) {
       const t = outAndBack(p, 0.58 + i * 0.015, 0.68 + i * 0.015, 0.83, 0.89);
       return { out: 25 * t, spin: 720 * t };                    // two turns as they back out
     }),
-    setting: 10 * outAndBack(p, 0.62, 0.70, 0.83, 0.89),
+    setting: { dz: 14 * settingPull, dy: 45 * settingSlide },   // out past the screws, then up clear of the knob
+    knob: 90 * outAndBack(p, 0.70, 0.76, 0.80, 0.83),           // a quarter turn while it's uncovered
     batteryDoor: { dz: 30 * doorPull, dx: -120 * doorSlide },   // out past the screws, then to screen-right
     batteries: [
       { dz: 45 * cell1, dy: 6 * cell1 },                         // the two AA cells come out through the opening,

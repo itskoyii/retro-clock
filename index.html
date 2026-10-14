@@ -6,13 +6,21 @@
   <title>Retro Flip Clock — a split-flap desk clock built in Spline</title>
   <meta name="description" content="An orange split-flap desk clock modelled to the millimetre in Spline. It shows your local time, flips every minute and comes apart as you scroll.">
   <meta name="theme-color" content="#e4e3df">
+  <!-- Start the 3D downloads straight away instead of waiting for main.js. Keep these URLs in sync
+       with the runtime import and SCENE_URL in main.js. -->
+  <link rel="preconnect" href="https://unpkg.com" crossorigin>
+  <link rel="preconnect" href="https://prod.spline.design" crossorigin>
+  <link rel="modulepreload" href="https://unpkg.com/@splinetool/runtime@2.0.82/build/runtime.js">
+  <link rel="preload" href="https://prod.spline.design/V4MRvqDF3GSNgWzS/scene.splinecode" as="fetch" crossorigin>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <canvas id="scene" aria-label="3D model of an orange split-flap desk clock showing your local time"></canvas>
+  <div class="stage">
+    <canvas id="scene" aria-label="3D model of an orange split-flap desk clock showing your local time"></canvas>
+  </div>
 
   <div class="loader" id="loader" role="status">
     <span class="loader-dot"></span>
@@ -38,8 +46,8 @@
       <div class="card card--left">
         <p class="eyebrow">01 · Mechanism</p>
         <h2>A real split flap</h2>
-        <p>Every minute the top flap falls 180° on its hinge pins, uncovers the next number and lands with a clack.</p>
-        <p class="hint">Turn the sound on (bottom right) to hear it.</p>
+        <p>Each drum carries a snail cam that winds up over the minute. At the step it snaps, the holdback tine lets go, and the top flap falls 180° onto the card below with a soft, hollow flump.</p>
+        <p class="hint">Turn the sound on (top right) to hear it.</p>
       </div>
     </section>
 
@@ -49,7 +57,8 @@
         <h2>Pulled apart</h2>
         <ul>
           <li>Clear acrylic cover and an orange front bezel</li>
-          <li>Split-flap movement: flap drums, nylon gear train and a quartz coil</li>
+          <li>Flap drums on spindles, with drum gears, snail cams, snap springs and holdback tines</li>
+          <li>Quartz motor driving a nylon reduction gear train</li>
           <li>Hollow housing and back plate with 2.5 mm walls</li>
         </ul>
       </div>
@@ -60,19 +69,21 @@
         <p class="eyebrow">03 · Back</p>
         <h2>Built to come apart</h2>
         <ul>
-          <li>Battery door sits flush with a 0.5 mm gap</li>
           <li>Counterbored screws thread into posts in the housing</li>
-          <li>Runs on two AA batteries in series</li>
+          <li>Time-setting knob under the setting door</li>
+          <li>Runs on two AA batteries</li>
         </ul>
       </div>
     </section>
 
     <section class="step" data-step="4">
       <div class="card card--right">
-        <p class="eyebrow">04 · Together</p>
-        <h2>Back in one piece</h2>
-        <p>Designed and built by <a href="https://github.com/itskoyii">itskoyii</a> in Spline. The model, flip script and this page are open source.</p>
-        <p><a class="button" href="https://github.com/itskoyii/retro-clock">View the code</a></p>
+        <p class="eyebrow">04 · Let's work together</p>
+        <h2>Got something worth building in 3D?</h2>
+        <p>I'm Koyi. I design and build interactive 3D for the web in Spline: product models, exploded views, scroll-driven stories and mechanisms that really move, like this clock.</p>
+        <p>If you have a product, a brand or an idea that deserves more than a flat image, let's talk about a collaboration.</p>
+        <p><a class="button" href="mailto:koyi.tsang@gmail.com?subject=3D%20design%20partnership%20%2F%20collaboration">Get in touch</a></p>
+        <p class="meta">Built by <a href="https://github.com/itskoyii">itskoyii</a>. The model, flip script and this page are <a href="https://github.com/itskoyii/retro-clock">open source</a>.</p>
       </div>
     </section>
   </main>

@@ -1,7 +1,8 @@
-import { Application } from 'https://unpkg.com/@splinetool/runtime@2.0.79/build/runtime.js';
+import { Application } from 'https://unpkg.com/@splinetool/runtime@2.0.82/build/runtime.js';
 import { pose, SECTION_STOPS } from './timeline.js';
 
-// Spline → Export → Code → copy the scene.splinecode URL and paste it here.
+// Spline → Export → Code → copy the scene.splinecode URL and paste it here
+// (and in the preload link in index.html, along with the runtime version above).
 const SCENE_URL = 'https://prod.spline.design/V4MRvqDF3GSNgWzS/scene.splinecode';
 
 const canvas = document.getElementById('scene');
@@ -18,6 +19,39 @@ const fitScale = () => { const aspect = innerWidth / innerHeight; return aspect 
 
 const copy = (v) => ({ x: v.x, y: v.y, z: v.z });
 
+// Spline's WebGPU renderer draws the "Built with Spline" badge differently from its classic WebGL
+// renderer, in two ways that need fixing (the badge itself always stays on screen):
+// 1. Size: it draws the badge at half the image's width in CSS pixels, where the WebGL renderer
+//    uses a quarter, so it comes out twice as big. A half-size copy of the image restores the
+//    usual size (137 × 36 px).
+// 2. Resizing: it bakes the badge's size into its effect chain and doesn't rebuild the chain on
+//    resize, so the badge stretches. The runtime resizes the canvas's drawing buffer whenever the
+//    size or pixel ratio changes; handing it the texture again at that point rebuilds it.
+// The WebGL renderer sizes the badge every frame and has no watermarkTexture, so nothing runs there.
+function fixBadge(app) {
+  const pipeline = app._renderer && app._renderer.pipeline;
+  const original = pipeline && pipeline.watermarkTexture;
+  if (!original) return;
+  let badge = original;
+  try {
+    const img = original.image, half = document.createElement('canvas');
+    half.width = Math.round(img.width / 2);
+    half.height = Math.round(img.height / 2);
+    const ctx = half.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, half.width, half.height);
+    ctx.getImageData(0, 0, 1, 1);   // throws if the image couldn't be read; keep the original then
+    badge = original.clone();
+    badge.source = new original.source.constructor(half);
+    badge.needsUpdate = true;
+    pipeline.setWatermark(badge);
+  } catch (e) {
+    badge = original;
+  }
+  new MutationObserver(() => pipeline.setWatermark(badge))
+    .observe(canvas, { attributes: true, attributeFilter: ['width', 'height'] });
+}
+
 async function start() {
   if (SCENE_URL.includes('REPLACE_WITH')) {
     loaderText.textContent = 'Add the Spline scene URL in main.js to load the clock.';
@@ -33,6 +67,7 @@ async function start() {
     loaderText.textContent = 'The clock could not load. Try refreshing the page.';
     return;
   }
+  fixBadge(app);
 
   const find = (name) => {
     const o = app.findObjectByName(name);
@@ -47,12 +82,13 @@ async function start() {
     back: find('Back Plate Group'),
     screws: ['Screw TL', 'Screw TR', 'Screw BL', 'Screw BR'].map(find),
     setting: find('Setting Door Assembly'),
+    knob: find('Time Set Knob'),
     batteryDoor: find('Battery Door Assembly'),
     batteries: ['AA Battery 1', 'AA Battery 2'].map(find),
     liner: find('Battery Gap Liner')
   };
   if (/[?&]debug\b/.test(location.search)) window.__retro = { app, parts };   // inspection hook for testing
-  const all = [parts.clock, parts.cover, parts.bezel, parts.housing, parts.back, parts.setting,
+  const all = [parts.clock, parts.cover, parts.bezel, parts.housing, parts.back, parts.setting, parts.knob,
     parts.batteryDoor, parts.liner, ...parts.batteries, ...parts.screws].filter(Boolean);
   loader.classList.add('is-done');
   if (!parts.clock) return;   // scene still shows and flips; only the scroll story is skipped
@@ -97,34 +133,43 @@ async function start() {
       move(o, { z: -s.screws[i].out });
       o.rotation.z = base.get(o).r.z - s.screws[i].spin * DEG;   // counter-clockwise seen from the back: unscrewing
     });
-    move(parts.setting, { z: -s.setting });
+    move(parts.setting, { z: -s.setting.dz, y: s.setting.dy });
+    if (parts.knob) parts.knob.rotation.z = base.get(parts.knob).r.z + s.knob * DEG;
     // pull the battery cover off the back, then slide it clear of the opening
     move(parts.batteryDoor, { z: -s.batteryDoor.dz, x: s.batteryDoor.dx });
     parts.batteries.forEach((o, i) => move(o, { z: -s.batteries[i].dz, y: s.batteries[i].dy }));
     if (parts.liner) parts.liner.visible = s.linerVisible;
   }
 
-  // Scroll → progress, smoothed so wheel steps glide; reduced motion snaps to section poses
+  // Scroll → progress, smoothed so wheel steps glide; reduced motion snaps to section poses.
+  // The loop only runs while the clock is catching up with the scroll position.
   const progress = () => {
     const max = document.documentElement.scrollHeight - innerHeight;
     return max > 0 ? Math.min(1, Math.max(0, scrollY / max)) : 0;
   };
   const nearestStop = (p) => SECTION_STOPS.reduce((a, b) => (Math.abs(b - p) < Math.abs(a - p) ? b : a));
-  let target = 0, current = 0, applied = -1, last = performance.now();
-  const onScroll = () => { const p = progress(); target = reduceMotion.matches ? nearestStop(p) : p; };
-  addEventListener('scroll', onScroll, { passive: true });
-  addEventListener('resize', () => { applied = -1; onScroll(); });   // re-fit size and pan to the new window
-  onScroll();
-  current = target;
+  let target = 0, current = 0, applied = -1, last = 0, running = false;
 
-  (function tick(now) {
-    const dt = Math.min(0.05, (now - last) / 1000);
+  function tick(now) {
+    const dt = Math.min(0.05, Math.max(0, now - last) / 1000);
     last = now;
     current = reduceMotion.matches ? target : current + (target - current) * (1 - Math.exp(-dt * 8));
     if (Math.abs(target - current) < 1e-4) current = target;
     if (current !== applied) { apply(current); applied = current; }
+    if (current === target) { running = false; return; }
     requestAnimationFrame(tick);
-  })(last);
+  }
+  const wake = () => {
+    if (running) return;
+    running = true;
+    last = performance.now();
+    requestAnimationFrame(tick);
+  };
+  const onScroll = () => { const p = progress(); target = reduceMotion.matches ? nearestStop(p) : p; wake(); };
+  addEventListener('scroll', onScroll, { passive: true });
+  addEventListener('resize', () => { applied = -1; onScroll(); });   // re-fit size and pan to the new window
+  onScroll();
+  current = target;
 }
 
 start();
