@@ -76,6 +76,9 @@ html, body {
   border-bottom: 1.5px solid var(--accent);
 }
 
+/* The scene's sound toggle (from its HTML overlay) sits in the header, clear of the Spline badge */
+body .sound { top: 14px; bottom: auto; right: calc(var(--gutter) + 72px); z-index: 6; }
+
 main { position: relative; z-index: 2; pointer-events: none; }
 
 .step {
@@ -132,7 +135,8 @@ a { color: var(--ink); }
 .button:focus-visible, .top-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 @media (max-width: 640px) {
-  .step { padding-bottom: 72px; }
+  /* the clock sits in the lower half of a tall screen, so the cards go to the top */
+  .step { align-items: flex-start; padding-top: 72px; padding-bottom: 72px; }
   .card { max-width: none; width: 100%; padding: 18px 18px; }
   .card--left, .card--right { margin: 0; }
 }

@@ -25,13 +25,13 @@
 // Split-flap mechanism for the Retro Flip Clock.
 // Shows the viewer's local time (24-hour). Each card has a moving flap on its hinge:
 // the flap falls forward 180°, revealing the new top half behind it and landing
-// with the new bottom half. Digit halves are clipped from the hidden "Glyph Source" text.
+// with the new bottom half. Numbers are built from the digit outlines stored in the
+// scene variable "glyphData" (Inter Bold, 52 pt) and clipped at the hinge line.
 (async () => {
   await spline.ready;
 
-  const CAP = 4500;          // fixed vertex capacity of each glyph mesh (matches the scene)
-  const CUT = 0.4;           // half of the 0.8 mm gap between flap halves
-  const FALL = 300, BOUNCE = 80, BOUNCE_DEG = 8;          // normal flip
+  const CUT = 0.4;                                          // half of the 0.8 mm gap between flap halves
+  const FALL = 300, BOUNCE = 80, BOUNCE_DEG = 8;            // normal flip
   const FLICK_FALL = 150, FLICK_BOUNCE = 40, FLICK_DEG = 4; // fast flick on load
   const FLICK_STEPS = 6;
 
@@ -41,8 +41,6 @@
     if (!o) console.warn('Clock: missing object "' + name + '"');
     return o;
   };
-  const src = await find('Glyph Source');
-  if (!src) return;
   const cards = {};
   for (const key of ['Hour', 'Minute']) {
     const ids = {};
@@ -54,11 +52,17 @@
     cards[key] = { ids, mod: key === 'Hour' ? 24 : 60, value: key === 'Hour' ? '10' : '12', target: null, queue: [], busy: false };
   }
 
-  // ---------- glyph halves ----------
-  const NZ_UP = new Float32Array(CAP * 3), NZ_DN = new Float32Array(CAP * 3);
-  for (let i = 0; i < CAP; i++) { NZ_UP[i * 3 + 2] = 1; NZ_DN[i * 3 + 2] = -1; }
-  const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
-  const sig = (g) => g ? g.vertexCount + ':' + Array.from(g.vertices.slice(0, 12)).map((v) => v.toFixed(2)).join(',') : '';
+  // ---------- digit outlines ----------
+  let data;
+  try {
+    const raw = await spline.getVariable('glyphData');
+    data = JSON.parse(typeof raw === 'string' ? raw : (raw && raw.textValue) || '');
+  } catch (e) {
+    console.error('Clock: could not read the glyphData variable', e);
+    return;
+  }
+  const bytes = (s) => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u.buffer; };
+  const DIGITS = data.digits.map((d) => ({ w: d.w, xy: new Int16Array(bytes(d.v)), idx: new Uint16Array(bytes(d.i)) }));
 
   function clip(tri, keepTop) {
     const edge = keepTop ? CUT : -CUT;
@@ -73,67 +77,46 @@
     }
     return out;
   }
-  function emit(poly, arr, n, mirror) {
-    for (let k = 1; k + 1 < poly.length; k++) {
-      for (const p of [poly[0], poly[k], poly[k + 1]]) {
-        if (n >= CAP) return n + 1;
-        arr[n * 3] = p[0]; arr[n * 3 + 1] = mirror ? -p[1] : p[1]; arr[n * 3 + 2] = 0;
-        n++;
-      }
+  function mesh(flat, mirror, nz) {                         // flat [x,y,...] triangle list → geometry write
+    const n = flat.length / 2;
+    const vertices = new Float32Array(n * 3), normals = new Float32Array(n * 3), indices = new Uint32Array(n);
+    for (let i = 0; i < n; i++) {
+      vertices[i * 3] = flat[i * 2];
+      vertices[i * 3 + 1] = mirror ? -flat[i * 2 + 1] : flat[i * 2 + 1];
+      normals[i * 3 + 2] = nz;
+      indices[i] = i;
     }
-    return n;
-  }
-  function halves(g) {
-    const v = g.vertices, idx = g.indices;
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (let i = 0; i < v.length; i += 3) {
-      if (v[i] < minX) minX = v[i]; if (v[i] > maxX) maxX = v[i];
-      if (v[i + 1] < minY) minY = v[i + 1]; if (v[i + 1] > maxY) maxY = v[i + 1];
-    }
-    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
-    const nTri = idx ? idx.length / 3 : v.length / 9;
-    const top = new Float32Array(CAP * 3), bottom = new Float32Array(CAP * 3), back = new Float32Array(CAP * 3);
-    let nt = 0, nb = 0, nk = 0;
-    for (let t = 0; t < nTri; t++) {
-      const a = idx ? idx[t * 3] : t * 3, b = idx ? idx[t * 3 + 1] : t * 3 + 1, c = idx ? idx[t * 3 + 2] : t * 3 + 2;
-      const tri = [[v[a * 3] - cx, v[a * 3 + 1] - cy], [v[b * 3] - cx, v[b * 3 + 1] - cy], [v[c * 3] - cx, v[c * 3 + 1] - cy]];
-      const tp = clip(tri, true), bp = clip(tri, false);
-      nt = emit(tp, top, nt, false);
-      nb = emit(bp, bottom, nb, false);
-      nk = emit(bp, back, nk, true);
-    }
-    if (nt > CAP || nb > CAP) console.warn('Clock: glyph exceeded vertex capacity', nt, nb);
-    return { top, bottom, back };
+    return { vertices, normals, indices };
   }
 
   const cache = new Map();
-  let srcText = '12';
-  let srcSig = sig(await spline.getGeometry(src.id));
-  let lock = Promise.resolve();
   function glyph(str) {
-    if (cache.has(str)) return Promise.resolve(cache.get(str));
-    const job = lock.then(async () => {
-      if (cache.has(str)) return cache.get(str);
-      let g;
-      if (str === srcText) {
-        g = await spline.getGeometry(src.id);
-      } else {
-        spline.updateObject(src.id, { geometry: { text: str } });
-        srcText = str;
-        for (let i = 0; i < 120; i++) {
-          await frame();
-          g = await spline.getGeometry(src.id);
-          const s = sig(g);
-          if (g && g.vertexCount > 0 && s !== srcSig) { srcSig = s; break; }
-        }
-      }
-      const h = halves(g);
-      cache.set(str, h);
-      return h;
-    });
-    lock = job.catch(() => {});
-    return job;
+    if (cache.has(str)) return cache.get(str);
+    const a = DIGITS[+str[0]], b = DIGITS[+str[1]], q = data.q;
+    const offset = a.w + data.gaps[+str];
+    const pts = [], tris = [];
+    const add = (g, dx) => {
+      const base = pts.length / 2;
+      for (let k = 0; k < g.xy.length; k += 2) pts.push(g.xy[k] / q + dx, g.xy[k + 1] / q);
+      for (let k = 0; k < g.idx.length; k++) tris.push(g.idx[k] + base);
+    };
+    add(a, 0);
+    add(b, offset);
+    let minY = Infinity, maxY = -Infinity;
+    for (let k = 1; k < pts.length; k += 2) { if (pts[k] < minY) minY = pts[k]; if (pts[k] > maxY) maxY = pts[k]; }
+    const cx = (offset + b.w) / 2, cy = (minY + maxY) / 2;
+    const top = [], bottom = [];
+    const emit = (poly, out) => { for (let k = 1; k + 1 < poly.length; k++) out.push(poly[0][0], poly[0][1], poly[k][0], poly[k][1], poly[k + 1][0], poly[k + 1][1]); };
+    for (let t = 0; t < tris.length; t += 3) {
+      const tri = [0, 1, 2].map((j) => [pts[tris[t + j] * 2] - cx, pts[tris[t + j] * 2 + 1] - cy]);
+      emit(clip(tri, true), top);
+      emit(clip(tri, false), bottom);
+    }
+    const g = { top: mesh(top, false, 1), bottom: mesh(bottom, false, 1), back: mesh(bottom, true, -1) };
+    cache.set(str, g);
+    return g;
   }
+  const write = (id, m) => spline.updateObject(id, { geometry: { vertices: m.vertices, normals: m.normals, indices: m.indices } });
 
   // ---------- sound (procedural WebAudio, off until the visitor turns it on) ----------
   const sfx = (() => {
@@ -192,6 +175,7 @@
   });
 
   // ---------- flap motion ----------
+  const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
   function swing(card, fall, bounce, bounceDeg, fast) {
     const pivot = card.ids['Flap Pivot'];
     return new Promise((done) => {
@@ -218,22 +202,15 @@
   }
 
   async function flipTo(card, to, fast) {
-    const g = await glyph(to);
+    const g = glyph(to);
     const ids = card.ids;
-    await Promise.all([
-      spline.updateObject(ids['Top Glyph'], { geometry: { vertices: g.top, normals: NZ_UP } }),
-      spline.updateObject(ids['Flap Back Glyph'], { geometry: { vertices: g.back, normals: NZ_DN } })
-    ]);
+    await Promise.all([write(ids['Top Glyph'], g.top), write(ids['Flap Back Glyph'], g.back)]);
     sfx.tick(fast);
     await swing(card, fast ? FLICK_FALL : FALL, fast ? FLICK_BOUNCE : BOUNCE, fast ? FLICK_DEG : BOUNCE_DEG, fast);
-    await Promise.all([
-      spline.updateObject(ids['Bottom Glyph'], { geometry: { vertices: g.bottom, normals: NZ_UP } }),
-      spline.updateObject(ids['Flap Front Glyph'], { geometry: { vertices: g.top, normals: NZ_UP } })
-    ]);
+    await Promise.all([write(ids['Bottom Glyph'], g.bottom), write(ids['Flap Front Glyph'], g.top)]);
     await frame(); await frame();
     spline.updateObject(ids['Flap Pivot'], { rotation: { x: 0 } });   // invisible reset: front now matches the top half behind it
     card.value = to;
-    glyph(pad((+to + 1) % card.mod));                                  // prepare the next value while idle
   }
 
   function enqueue(card, values, fast) {

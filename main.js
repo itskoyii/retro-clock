@@ -1,4 +1,4 @@
-import { Application } from 'https://unpkg.com/@splinetool/runtime@2.0.60/build/runtime.js';
+import { Application } from 'https://unpkg.com/@splinetool/runtime@2.0.79/build/runtime.js';
 import { pose, SECTION_STOPS } from './timeline.js';
 
 // Spline → Export → Code → copy the scene.splinecode URL and paste it here.
@@ -10,8 +10,11 @@ const loaderText = document.getElementById('loader-text');
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
 const DEG = Math.PI / 180;
-const CENTER = { x: 0, y: 73, z: 0 };                                      // clock body centre (world, mm)
-const TOWARD_CAMERA = { x: Math.sin(24 * DEG), z: Math.cos(24 * DEG) };   // Site Camera sits at azimuth 24°
+const ANCHOR = { x: 0, y: 0, z: 0 };                                      // clock centre on the table (world, mm)
+const CAMERA_RIGHT = { x: Math.cos(24 * DEG), z: -Math.sin(24 * DEG) };   // screen-right for the Site Camera (azimuth 24°)
+const panScale = () => (innerWidth > 640 ? 1 : 0);                        // phones stack the cards below, no pan
+// Narrow portrait screens: shrink the clock so it fits the width
+const fitScale = () => { const aspect = innerWidth / innerHeight; return aspect < 1.2 ? Math.max(0.45, aspect / 1.35) : 1; };
 
 const copy = (v) => ({ x: v.x, y: v.y, z: v.z });
 
@@ -39,56 +42,67 @@ async function start() {
   const parts = {
     clock: find('Retro Flip Clock'),
     cover: find('Clear Cover'),
-    hour: find('Hour Card'),
-    minute: find('Minute Card'),
+    bezel: find('Front Bezel Group'),
+    housing: find('Housing Group'),
+    back: find('Back Plate Group'),
     screws: ['Screw TL', 'Screw TR', 'Screw BL', 'Screw BR'].map(find),
     setting: find('Setting Door Assembly'),
-    battery: find('Battery Door Assembly'),
+    batteryDoor: find('Battery Door Assembly'),
+    batteries: ['AA Battery 1', 'AA Battery 2'].map(find),
     liner: find('Battery Gap Liner')
   };
-  const all = [parts.clock, parts.cover, parts.hour, parts.minute, parts.setting, parts.battery, parts.liner, ...parts.screws];
+  if (/[?&]debug\b/.test(location.search)) window.__retro = { app, parts };   // inspection hook for testing
+  const all = [parts.clock, parts.cover, parts.bezel, parts.housing, parts.back, parts.setting,
+    parts.batteryDoor, parts.liner, ...parts.batteries, ...parts.screws].filter(Boolean);
   loader.classList.add('is-done');
-  if (all.some((o) => !o)) return;   // scene still shows and flips; only the scroll story is skipped
+  if (!parts.clock) return;   // scene still shows and flips; only the scroll story is skipped
 
-  // Authored transforms: every scroll pose is an offset from these
+  // Authored transforms: every scroll pose is an offset from these.
+  // A part missing from the scene is simply left where it is.
   const base = new Map();
   for (const o of all) base.set(o, { p: copy(o.position), r: copy(o.rotation) });
 
-  const offsetZ = (o, dz) => { o.position.z = base.get(o).p.z + dz; };
+  const move = (o, d) => {
+    if (!o) return;
+    const b = base.get(o).p;
+    o.position.x = b.x + (d.x || 0);
+    o.position.y = b.y + (d.y || 0);
+    o.position.z = b.z + (d.z || 0);
+  };
 
   function apply(p) {
     const s = pose(p);
 
-    // Rotate the whole clock about its body centre (the group origin sits slightly off it)
+    // Turn and scale the whole clock about its centre on the table, so it pivots in place and its
+    // feet stay on the surface (the group's origin sits slightly off that point)
     const c = base.get(parts.clock);
-    const th = s.clock.rot * DEG;
-    const vx = c.p.x - CENTER.x, vz = c.p.z - CENTER.z;
-    parts.clock.position.x = CENTER.x + vx * Math.cos(th) + vz * Math.sin(th) + TOWARD_CAMERA.x * s.clock.dolly;
-    parts.clock.position.z = CENTER.z - vx * Math.sin(th) + vz * Math.cos(th) + TOWARD_CAMERA.z * s.clock.dolly;
+    const th = s.clock.rot * DEG, k = s.clock.size * fitScale();
+    const lx = ANCHOR.x - c.p.x, ly = ANCHOR.y - c.p.y, lz = ANCHOR.z - c.p.z;   // anchor in the group's own frame
+    const pan = s.clock.pan * panScale();
+    parts.clock.position.x = ANCHOR.x - k * (lx * Math.cos(th) + lz * Math.sin(th)) + CAMERA_RIGHT.x * pan;
+    parts.clock.position.y = ANCHOR.y - k * ly;
+    parts.clock.position.z = ANCHOR.z - k * (-lx * Math.sin(th) + lz * Math.cos(th)) + CAMERA_RIGHT.z * pan;
     parts.clock.rotation.y = c.r.y + th;
+    parts.clock.scale.x = parts.clock.scale.y = parts.clock.scale.z = k;
 
-    offsetZ(parts.cover, s.cover);
-    offsetZ(parts.hour, s.cards);
-    offsetZ(parts.minute, s.cards);
+    // Shells slide away from the movement, which stays put
+    move(parts.cover, { z: s.cover });
+    move(parts.bezel, { z: s.bezel });
+    move(parts.housing, { z: s.housing });
+    move(parts.back, { z: s.back });
+
+    // Back details move relative to the back plate
     parts.screws.forEach((o, i) => {
-      const b = base.get(o);
-      o.position.z = b.p.z - s.screws[i].out;
-      o.rotation.z = b.r.z - s.screws[i].spin * DEG;   // counter-clockwise seen from the back: unscrewing
+      if (!o) return;
+      move(o, { z: -s.screws[i].out });
+      o.rotation.z = base.get(o).r.z - s.screws[i].spin * DEG;   // counter-clockwise seen from the back: unscrewing
     });
-    offsetZ(parts.setting, -s.setting);
-    const bd = base.get(parts.battery);
-    parts.battery.position.z = bd.p.z - s.battery.dz;
-    parts.battery.position.y = bd.p.y - s.battery.dy;
-    parts.liner.visible = s.linerVisible;
+    move(parts.setting, { z: -s.setting });
+    // pull the battery cover off the back, then slide it clear of the opening
+    move(parts.batteryDoor, { z: -s.batteryDoor.dz, x: s.batteryDoor.dx });
+    parts.batteries.forEach((o, i) => move(o, { z: -s.batteries[i].dz, y: s.batteries[i].dy }));
+    if (parts.liner) parts.liner.visible = s.linerVisible;
   }
-
-  // Narrow portrait screens: zoom out so the whole clock fits the width
-  const fit = () => {
-    const aspect = innerWidth / innerHeight;
-    if (aspect < 1.2) app.setZoom(Math.max(0.45, aspect / 1.35));
-  };
-  fit();
-  addEventListener('resize', fit);
 
   // Scroll → progress, smoothed so wheel steps glide; reduced motion snaps to section poses
   const progress = () => {
@@ -99,7 +113,7 @@ async function start() {
   let target = 0, current = 0, applied = -1, last = performance.now();
   const onScroll = () => { const p = progress(); target = reduceMotion.matches ? nearestStop(p) : p; };
   addEventListener('scroll', onScroll, { passive: true });
-  addEventListener('resize', onScroll);
+  addEventListener('resize', () => { applied = -1; onScroll(); });   // re-fit size and pan to the new window
   onScroll();
   current = target;
 
