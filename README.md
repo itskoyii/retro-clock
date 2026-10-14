@@ -2,6 +2,8 @@
 
 An orange split-flap desk clock, modelled to the millimetre in [Spline](https://spline.design). It shows your local time in 24-hour format, flips every minute, and comes apart as you scroll.
 
+![The Retro Flip Clock, modelled in Spline](images/retro-clock.png)
+
 **Live:** _coming soon_
 
 ## What it does
