@@ -14,8 +14,8 @@ const DEG = Math.PI / 180;
 const ANCHOR = { x: 0, y: 0, z: 0 };                                      // clock centre on the table (world, mm)
 const CAMERA_RIGHT = { x: Math.cos(24 * DEG), z: -Math.sin(24 * DEG) };   // screen-right for the Site Camera (azimuth 24°)
 const panScale = () => (innerWidth > 640 ? 1 : 0);                        // phones stack the cards below, no pan
-// Narrow portrait screens: shrink the clock so it fits the width
-const fitScale = () => { const aspect = innerWidth / innerHeight; return aspect < 1.2 ? Math.max(0.45, aspect / 1.35) : 1; };
+// Windows narrower than 16:9: shrink the clock in proportion, so it never runs off the side
+const fitScale = () => { const aspect = innerWidth / innerHeight; return aspect < 1.8 ? Math.max(0.45, aspect / 1.8) : 1; };
 
 const copy = (v) => ({ x: v.x, y: v.y, z: v.z });
 

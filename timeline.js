@@ -18,8 +18,8 @@ const CLOCK_KEYS = [
   { p: 0.08, rot: 0, size: 0.8, pan: 60 },
   { p: 0.20, rot: 18, size: 1.0, pan: 70 },      // mechanism: turn to the camera, come closer
   { p: 0.30, rot: 18, size: 1.0, pan: 70 },
-  { p: 0.45, rot: -30, size: 0.55, pan: -80 },   // full exploded view, small enough for every layer (card on the right)
-  { p: 0.55, rot: -30, size: 0.55, pan: -80 },
+  { p: 0.45, rot: -30, size: 0.55, pan: -65 },   // full exploded view, small enough for every layer (card on the right)
+  { p: 0.55, rot: -30, size: 0.55, pan: -65 },
   { p: 0.70, rot: -150, size: 0.8, pan: 30 },    // round to the back: screws, battery cover, batteries
   { p: 0.80, rot: -150, size: 0.8, pan: 30 },
   { p: 0.95, rot: -360, size: 0.8, pan: -40 },   // one full turn back to the hero pose (card on the right)
