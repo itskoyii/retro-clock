@@ -4,7 +4,7 @@ An orange split-flap desk clock, modelled to the millimetre in [Spline](https://
 
 ![The Retro Flip Clock, modelled in Spline](images/retro-clock.png)
 
-**Live:** _coming soon_
+**Live:** https://itskoyii.github.io/retro-clock/
 
 ## What it does
 
